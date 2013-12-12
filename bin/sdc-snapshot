@@ -1,0 +1,56 @@
+#!/bin/bash
+
+set -e
+
+export SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-"/dev/null"}
+export SDC_ACCOUNT=${SDC_ACCOUNT:?"Missing variable SDC_ACCOUNT"}
+export SDC_URL=${SDC_URL:?"Missing variable SDC_URL"}
+export SDC_KEY_ID=${SDC_KEY_ID:-`ssh-keygen -l -f ~/.ssh/sdc-snapshot.pub | awk '{print $2}' | tr -d '\n'`}
+export MAX_SNAPSHOTS=${MAX_SNAPSHOTS:-10}
+export MIN_FREE=${MIN_FREE:-500000}  # 500Gb
+
+MACHINE=`zonename`
+
+## functions
+count_snapshots () {
+  set +e
+  SNAPSHOT_COUNT=`sdc-listmachinesnapshots --keyId $SDC_KEY_ID $MACHINE | grep state | grep -c created`
+  set -e
+}
+
+create_snapshot () {
+  sdc-createmachinesnapshot --keyId "$SDC_KEY_ID" --machine $MACHINE | grep name | awk 'BEGIN{FS="\""}{print $4}'
+}
+
+oldest_snapshots () {
+  set +e
+  OLDEST_SNAPSHOTS=`sdc-listmachinesnapshots --keyId "$SDC_KEY_ID" $MACHINE | grep -B 1 "\"state\": \"created\"" | grep "\name\"" | tac | tail +$MAX_SNAPSHOTS | awk 'BEGIN{FS="\""}{print $4}'`
+  set -e
+}
+
+delete_oldest_snapshots () {
+  oldest_snapshots
+  for snapshot in $OLDEST_SNAPSHOTS
+    do
+      echo "[`date`] deleting snapshot $snapshot..." >> /var/log/sdc-snapshot.log
+      sdc-deletemachinesnapshot --debug --keyId "$SDC_KEY_ID" --snapshot "$snapshot" $MACHINE
+    done
+}
+
+check_free_space () {
+  FREE=`df -m / | tail -1| awk '{print $4}'`
+  if [ $FREE -lt $MIN_FREE ]; then
+    echo "not enough free space left for snapshots, giving up! Need ${MIN_FREE}Mb, have ${FREE}Mb"
+    exit 1
+  fi
+}
+
+## delete all but the $MAX_SNAPSHOTS most recent snapshots and create a new one
+count_snapshots
+
+delete_oldest_snapshots
+
+check_free_space
+
+echo "[`date`] creating snapshot..." >> /var/log/sdc-snapshot.log
+create_snapshot

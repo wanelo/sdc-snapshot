@@ -1,0 +1,10 @@
+#!/bin/bash
+
+export SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-"/dev/null"}
+export SDC_ACCOUNT=${SDC_ACCOUNT:?"Missing variable SDC_ACCOUNT"}
+export SDC_URL=${SDC_URL:?"Missing variable SDC_URL"}
+export SDC_KEY_ID=${SDC_KEY_ID:-`ssh-keygen -l -f ~/.ssh/sdc-snapshot.pub | awk '{print $2}' | tr -d '\n'`}
+
+MACHINE=`zonename`
+
+sdc-listmachinesnapshots --debug --keyId $SDC_KEY_ID $MACHINE | grep "\"name\"" | awk 'BEGIN {FS="\""};{print $4}'
